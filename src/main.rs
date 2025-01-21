@@ -32,53 +32,58 @@ struct Args {
 
 #[derive(PartialEq)]
 enum RowFilterOperator {
-    // Equal,
-    // Lesser,
-    // Greater,
+    Equal,
+    Lesser,
+    Greater,
     EqualString
-}
-
-impl RowFilterOperator {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::EqualString, Self::EqualString) => true,
-            _ => false,
-        }
-    }
 }
 
 struct RowFilter {
     left_column: Option<usize>,
-    right_column: Option<usize>,
-    left_value: Option<String>,
+    right_column: Option<usize>,  // not used, but left for future flexibility
+    left_value: Option<String>,   // not used, but left for future flexibility
     right_value: Option<String>,
     operator: RowFilterOperator,
 }
 
 impl RowFilter {
     fn new(filter_str: &str, col_idx_dict: HashMap<String, usize>) -> Self {
-
-        // TODO: depending on what the filter string says,
-        //       a different filter should be built
-
         let operator : RowFilterOperator;
-
-        // In the three first cases,
-        // left and right are coerced as float numbers
-        // if filter_str.contains("<") {
-        //     operator = RowFilterOperator::Lesser;
-        // } else if filter_str.contains(">") {
-        //     operator = RowFilterOperator::Greater;
-        // } else if filter_str.contains("==") {
-        //     operator = RowFilterOperator::Equal;
-        // } else
         
         let left_and_right: Vec<&str>;
         let left_column: usize;
-        let right_column: usize;
-        let left_value: &str;
         let right_value: &str;
-        if filter_str.contains("=") {
+        if filter_str.contains("<") || filter_str.contains(">") || filter_str.contains("==") {
+            if filter_str.contains("<") {
+                left_and_right = filter_str.split('<').collect();
+                operator = RowFilterOperator::Lesser;
+            } else if filter_str.contains(">") {
+                left_and_right = filter_str.split('>').collect();
+                operator = RowFilterOperator::Greater;
+            } else {
+                left_and_right = filter_str.split("==").collect();
+                operator = RowFilterOperator::Equal;
+            }
+
+            // In this case, left should be the column
+            // And right should be the value
+            left_column = *col_idx_dict.get(left_and_right[0]).unwrap();
+
+            // We get the index column
+            right_value = left_and_right[1];
+
+            if left_and_right.len() != 2 {
+                panic!("Wrong formatted filter: {}", filter_str);
+            }
+
+            return Self {
+                left_column: Some(left_column),
+                right_column: None,
+                left_value: None,
+                right_value: Some(String::from(right_value)),
+                operator: operator,
+            };
+        } else if filter_str.contains("=") {
             // In this case, left and right are treated as strings
             operator = RowFilterOperator::EqualString;
             left_and_right = filter_str.split('=').collect();
@@ -89,38 +94,44 @@ impl RowFilter {
             // We get the index column
             right_value = left_and_right[1];
 
+            if left_and_right.len() != 2 {
+                panic!("Wrong formatted filter: {}", filter_str);
+            }
+
             return Self {
                 left_column: Some(left_column),
                 right_column: None,
                 left_value: None,
                 right_value: Some(String::from(right_value)),
                 operator: operator,
-            }
+            };
         } else {
             panic!("No operator for filter string {}", filter_str);
         }
-
-        if left_and_right.len() != 2 {
-            panic!("Wrong formatted filter: {}", filter_str);
-        }
-        
-        Self {
-            left_column: None,
-            right_column: None,
-            left_value: None,
-            right_value: None,
-            operator: operator,
-        }
     }
 
-    fn accepts(&self, row: csv::StringRecord) -> bool {
+    fn accepts(&self, row: StringRecord) -> bool {
         match self.operator {
             RowFilterOperator::EqualString => {
                 let left_value = row.get(self.left_column.unwrap()).unwrap();
                 let right_value = self.right_value.as_ref().unwrap().as_str();
                 return left_value == right_value;
             },
-            _ => panic!("Unknown operator"), 
+            RowFilterOperator::Equal => {
+                let left_value = row.get(self.left_column.unwrap()).unwrap().parse::<f32>().unwrap();
+                let right_value = self.right_value.as_ref().unwrap().as_str().parse::<f32>().unwrap();
+                return left_value == right_value;
+            },
+            RowFilterOperator::Lesser => {
+                let left_value = row.get(self.left_column.unwrap()).unwrap().parse::<f32>().unwrap();
+                let right_value = self.right_value.as_ref().unwrap().as_str().parse::<f32>().unwrap();
+                return left_value < right_value;
+            },
+            RowFilterOperator::Greater => {
+                let left_value = row.get(self.left_column.unwrap()).unwrap().parse::<f32>().unwrap();
+                let right_value = self.right_value.as_ref().unwrap().as_str().parse::<f32>().unwrap();
+                return left_value > right_value;
+            }
         }
     }
 }
@@ -238,8 +249,8 @@ fn read_csv(csv: &str, cols: Option<String>,
 // csvpeek <file> --cols col1,col2,col3 -> shows the data but only for certain columns
 // csvpeek <file> -n N -> shows up to N rows
 // csvpeek <file> --offset M -> Ignore first M rows
-// Next features (not implemented yet):
-// csvpeek <file> --filter "image_number<3" -> applies different filters: <, >, =, streq, etc.
+// csvpeek <file> --filter "image_number<3" -> applies different filters: <, >, = (string equality) and == (numeric equality).
+// Features not implemented yet:
 // csvpeek <file> --cols col1 --agg sum -> does an aggregate of the columns.
 // Agregates: sum, stdp, stds, avg, count
 fn main() {
